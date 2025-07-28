@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset = "UTF-8">
+<style>
+	body {
+		margin: 0;
+		display: grid;
+		min-height: 10vh;
+		place-items: center;
+		background-color: lightgray;
+	}
+	div {
+		text-align: center;
+	}
+
+	p, button {
+		text-align: center;
+	}
+
+		</style>
+<title>QA Upload</title></head>
+<link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+<body>
+    <h1>QA Upload</h1>
+	<div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "25%" height = "25%"></div>
+    <p>Please upload your completed QA scorecards here, one at a time.</p>
+	<p>They MUST use the latest spreadsheet that Monica distributed and MUST be an Excel spreadsheet file.</p>
+	
+	<form method="post" enctype="multipart/form-data" action="/upload">
+  <label for="file">File:</label>
+  <div><input id="file" name="file" type="file" /><br><br></div>
+  <div><button class="file">Upload</button></div>
+</form>
+
+</body>
+<!-- Why are you looking at this? :)  ~ Clay-->
+</html>
+
+
