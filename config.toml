@@ -22,3 +22,22 @@ emails = ['william.youngiv@dhr-rgv.com',
           'r.tanguma@dhr-rgv.com',
           'ver.flores@dhr-rgv.com'
           ]
+[qas]
+'Monica Estrada' = 'Neurology, Neurosurgery, Neuro Operators'
+'Daisy Colin' = 'Surgery'
+
+'Eric Gaona' = """Transplant, Urgent Care, Hand and Wrist,
+Plastics, Counselling, Orthopedics, Rheumatology"""
+
+'Juan I. Recio' = 'Diabetes and Endocrinology'
+'Bianca Garcia' = 'Urology'
+
+'Lori Muniz' = """ENT, ENT South, Brownsville MSC,
+Weslaco MSC, Rio Grande City MSC"""
+
+'Josefina Molina' = 'All PCPs'
+'Jewlyssa Gonzalez' = 'Oncology'
+'Gabriel Mejia' = 'Gastroenterology'
+'Debra Carrion' = 'All Cardio Clinics'
+
+names = ["Monica Estrada", "Daisy Colin", "Eric Gaona", "Juan I. Recio", "Bianca Garcia", "Lori Muniz", "Josefina Molina", "Jewlyssa Gonzalez", "Gabriel Mejia", "Debra Carrion"]

@@ -3,7 +3,7 @@
 
 from openpyxl import load_workbook
 from fastapi import FastAPI, Form, Request, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 import psycopg2
 import toml
@@ -14,6 +14,10 @@ from tempfile import NamedTemporaryFile
 import os.path
 import os
 from datetime import datetime
+import pytimeparse
+import math
+import csv
+from icecream import ic
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static") #logo and favicon go here
@@ -24,6 +28,8 @@ SERVER: str = CONFIG['comms']['server']
 PORT: int = CONFIG['comms']['port']
 FROM: str = CONFIG['comms']['from']
 TO: list[str] = CONFIG['comms']['emails'] #list of emails to send responses to
+CLINICS: dict = CONFIG['qas'] #dict of QA name : clinic mapping
+names: list[str] = CONFIG['qas']['names'] #list of QA names
 
 # Set up postgresql table
 def init_db():
@@ -47,7 +53,8 @@ def init_db():
                 trainer TEXT,
                 qa_date DATE,
                 overall_result TEXT,
-                filename TEXT)
+                filename TEXT,
+                scoring_time TEXT)
                 ;'''
             )
     cur.close()
@@ -103,9 +110,19 @@ async def process_file(file: UploadFile):
             if not phone:
                 phone = sheet_ranges['F6'].value.split(":")[-1].strip()
 
-            handle_time = sheet_ranges['G7'].value
+            handle_time = str(sheet_ranges['G7'].value)
             if not handle_time:
                 handle_time = sheet_ranges['F7'].value.split(":")[-1].strip()
+            
+            parsed_time = 1.5 * (pytimeparse.parse(handle_time)) # type: ignore
+            minutes = str(math.floor(parsed_time / 60)) # type: ignore
+            seconds = str(int(parsed_time % 60)) # type: ignore
+            if len(minutes) == 1:
+                minutes = '0' + minutes
+            if len(seconds) == 1:
+                seconds = '0' + seconds
+            scoring_time = f'0:{minutes}:{seconds}'
+            print(handle_time, scoring_time)
 
             try:
                 gen_call_score = int(sheet_ranges['I22'].value.split("/")[0].strip())
@@ -186,10 +203,11 @@ async def process_file(file: UploadFile):
                     trainer,
                     qa_date,
                     overall_result,
-                    filename)
+                    filename,
+                    scoring_time)
                     VALUES 
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);'''
-            DATA = (agent, extension, clinic, date_time, phone, handle_time, gen_call_score, sched_call_score, complaint_call_score, procedure_call_score, sched_proc_veri_score, trainer, qa_date, overall_result, qa_filename)
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);'''
+            DATA = (agent, extension, clinic, date_time, phone, handle_time, gen_call_score, sched_call_score, complaint_call_score, procedure_call_score, sched_proc_veri_score, trainer, qa_date, overall_result, qa_filename, scoring_time)
             cur.execute(SQL, DATA)
             cur.close()
             con.commit()
@@ -290,14 +308,12 @@ async def startup_event():
         print(e)
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def read_root():
-    names = ["Monica Estrada", "Daisy Colin", "Eric Gaona", "Juan I. Recio"] #names of QAs
-    
+async def read_root():    
     # HTML table with auto-refresh
     html_content = """
     <html>
         <head>
-            <meta http-equiv="refresh" content="300"> <!-- Auto-refresh every 5 minutes seconds -->
+            <meta http-equiv="refresh" content="300"> <!-- Auto-refresh every 5 minutes -->
             <style>
             h2 {
             font-size: 40px;
@@ -335,6 +351,7 @@ async def read_root():
     text-align : center;}
 
             </style>
+            <title>Quality Assurance Dashboard</title>
         </head>
         <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
         <body>
@@ -343,32 +360,20 @@ async def read_root():
 <table>
                 <tr>
                     <th>Clinic(s)</th>
-                    <th>Name</th>
+                    <th>Trainer</th>
                     <th>Quality Assurance Count Today</th>
                     <th>Average Score Today</th>
-                    <th>Running Weekly Total</th>
+                    <th>Weekly Target</th>
                     <th>Weekly Goal</th>
                 </tr>
     """ % (datetime.now().strftime("%I:%M %p"),) 
 
     for name in names:
-        clinic: str = ''
-        if name == "Monica Estrada":
-            clinic = "Neuro / Operators"
-        elif name == "Eric Gaona":
-            clinic = """Transplant / Counseling
-    ENT / ENT South 
-    All MSCs / Rheuma / Diabetes & Endo """
-        elif name == "Daisy Colin":
-            clinic = "Surgery"
-        elif name == "Juan I. Recio":
-            clinic = "Endo"
+        clinic: str = CLINICS[name]
 
         running_total = get_running_total(name)
 
-        progress_bar = '                    '
-        count = int(round((running_total / 200) * 20, 0))
-        final_bar = progress_bar.replace(' ', '=', count) # type: ignore
+        weekly_progress = (round(running_total / 200, 2) * 100)
 
         count = get_daily_qa_count(name)
         try:
@@ -381,15 +386,20 @@ async def read_root():
             color = 'orange'
         else:
             color = 'green'
-        
+
+        if running_total == 200:
+            color2 = 'green'
+        else:
+            color2 = 'red'
+
         html_content += f"""
                 <tr>
                     <td>{clinic}</td>
                     <td>{name}</td>
                     <td>{count} / 40</td>
                     <td style="color: {color}"><b>{average_score}</b></td>
-                    <td>{running_total}</td>
-                    <td><pre>[{final_bar}]</pre></td
+                    <td style="color: {color2}">{weekly_progress}%</td>
+                    <td>200</td
                 </tr>
         """
 
@@ -557,6 +567,352 @@ async def daisy_files(request: Request):
         </html>"""
 
     return HTMLResponse(content=html_content)
+
+@app.get("/bianca", response_class=HTMLResponse)
+async def biancy_files(request: Request):
+    bianca_files = get_trainer_files("Bianca Garcia")
+    html_content = """
+            <html>
+            <head>            
+                <style>
+                body {
+            margin: 0;
+            display: grid;
+            min-height: 10vh;
+            place-items: center;
+            background-color: lightgray;
+        }
+        div {
+            text-align: center;
+        }
+
+        p, button {
+            text-align: center;
+        }
+                </style>
+            </head>
+            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+            <body>
+            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
+                <h2>Bianca's Uploaded Files for the Day</h2>"""                
+
+    for item in bianca_files:
+        html_content += f"""
+        {item[0]}<br>"""
+
+    html_content += """<p>To upload a file, click the link below.</p>
+        <div><a href="/" class="active">Go back</a></div>
+        </body>
+        </html>"""
+
+    return HTMLResponse(content=html_content)
+
+@app.get("/lori", response_class=HTMLResponse)
+async def lori_files(request: Request):
+    lori_files = get_trainer_files("Lori Muniz")
+    html_content = """
+            <html>
+            <head>            
+                <style>
+                body {
+            margin: 0;
+            display: grid;
+            min-height: 10vh;
+            place-items: center;
+            background-color: lightgray;
+        }
+        div {
+            text-align: center;
+        }
+
+        p, button {
+            text-align: center;
+        }
+                </style>
+            </head>
+            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+            <body>
+            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
+                <h2>Lori's Uploaded Files for the Day</h2>"""                
+
+    for item in lori_files:
+        html_content += f"""
+        {item[0]}<br>"""
+
+    html_content += """<p>To upload a file, click the link below.</p>
+        <div><a href="/" class="active">Go back</a></div>
+        </body>
+        </html>"""
+
+    return HTMLResponse(content=html_content)
+
+@app.get("/josie", response_class=HTMLResponse)
+async def josie_files(request: Request):
+    josie_files = get_trainer_files("Josefina Molina")
+    html_content = """
+            <html>
+            <head>            
+                <style>
+                body {
+            margin: 0;
+            display: grid;
+            min-height: 10vh;
+            place-items: center;
+            background-color: lightgray;
+        }
+        div {
+            text-align: center;
+        }
+
+        p, button {
+            text-align: center;
+        }
+                </style>
+            </head>
+            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+            <body>
+            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
+                <h2>Josie's Uploaded Files for the Day</h2>"""                
+
+    for item in josie_files:
+        html_content += f"""
+        {item[0]}<br>"""
+
+    html_content += """<p>To upload a file, click the link below.</p>
+        <div><a href="/" class="active">Go back</a></div>
+        </body>
+        </html>"""
+
+    return HTMLResponse(content=html_content)
+
+@app.get("/jewlyssa", response_class=HTMLResponse)
+async def jewlyssa_files(request: Request):
+    jewlyssa_files = get_trainer_files("Jewlyssa Gonzalez")
+    html_content = """
+            <html>
+            <head>            
+                <style>
+                body {
+            margin: 0;
+            display: grid;
+            min-height: 10vh;
+            place-items: center;
+            background-color: lightgray;
+        }
+        div {
+            text-align: center;
+        }
+
+        p, button {
+            text-align: center;
+        }
+                </style>
+            </head>
+            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+            <body>
+            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
+                <h2>Jewlyssa's Uploaded Files for the Day</h2>"""                
+
+    for item in jewlyssa_files:
+        html_content += f"""
+        {item[0]}<br>"""
+
+    html_content += """<p>To upload a file, click the link below.</p>
+        <div><a href="/" class="active">Go back</a></div>
+        </body>
+        </html>"""
+
+    return HTMLResponse(content=html_content)
+
+@app.get("/gabriel", response_class=HTMLResponse)
+async def gabriel_files(request: Request):
+    gabriel_files = get_trainer_files("Gabriel Mejia")
+    html_content = """
+            <html>
+            <head>            
+                <style>
+                body {
+            margin: 0;
+            display: grid;
+            min-height: 10vh;
+            place-items: center;
+            background-color: lightgray;
+        }
+        div {
+            text-align: center;
+        }
+
+        p, button {
+            text-align: center;
+        }
+                </style>
+            </head>
+            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+            <body>
+            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
+                <h2>Gabriel's Uploaded Files for the Day</h2>"""                
+
+    for item in gabriel_files:
+        html_content += f"""
+        {item[0]}<br>"""
+
+    html_content += """<p>To upload a file, click the link below.</p>
+        <div><a href="/" class="active">Go back</a></div>
+        </body>
+        </html>"""
+
+    return HTMLResponse(content=html_content)
+
+@app.get("/debra", response_class=HTMLResponse)
+async def debra_files(request: Request):
+    debra_files = get_trainer_files("Debra Carrion")
+    html_content = """
+            <html>
+            <head>            
+                <style>
+                body {
+            margin: 0;
+            display: grid;
+            min-height: 10vh;
+            place-items: center;
+            background-color: lightgray;
+        }
+        div {
+            text-align: center;
+        }
+
+        p, button {
+            text-align: center;
+        }
+                </style>
+            </head>
+            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+            <body>
+            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
+                <h2>Debra's Uploaded Files for the Day</h2>"""                
+
+    for item in debra_files:
+        html_content += f"""
+        {item[0]}<br>"""
+
+    html_content += """<p>To upload a file, click the link below.</p>
+        <div><a href="/" class="active">Go back</a></div>
+        </body>
+        </html>"""
+
+    return HTMLResponse(content=html_content)
+
+@app.post("/report")
+async def run_report(month_from: int = Form(...), day_from: int = Form(...), year_from: int = Form(...), month_to: int = Form(...), day_to: int = Form(...), year_to: int = Form(...)):
+    con = psycopg2.connect(f'dbname = {CONFIG['credentials']['dbname']} user = {CONFIG['credentials']['username']} password = {CONFIG['credentials']['password']}')
+    cur = con.cursor()
+
+    from_date = str(year_from) + "-" + str(month_from) + "-" + str(day_from)
+    to_date = str(year_to) + "-" + str(month_to) + "-" + str(day_to)
+
+    with open('qa_report.csv', 'w', newline = '') as output:
+        writer = csv.writer(output)
+        writer.writerow(["QA Name", "Clinics", "Agents Scored", "Average Score", "Number of Calls", "Date Range", "Agents Trending Download in Score", "Agents Trending Upward in Score", "Total Time Scoring Calls"])
+        for name in names:
+            try:
+                SQL = "SELECT agent FROM qa WHERE (trainer = %s AND (upload_date >= %s AND upload_date <= %s));"
+                DATA = (name, from_date, to_date)
+                cur.execute(SQL, DATA)
+                agents = cur.fetchall()
+
+                SQL = "SELECT COUNT(*) FROM qa WHERE (trainer = %s AND (upload_date >= %s AND upload_date <= %s));"
+                DATA = (name, from_date, to_date)
+                cur.execute(SQL, DATA)
+                calls = cur.fetchone()[0] # type: ignore
+
+                agents_scored = []
+                trending_up = []
+                trending_down = []
+                for agent in agents:
+                    if agent[0] not in agents_scored:
+                        agents_scored.append(agent[0])
+
+                date_range = from_date + ' - ' + to_date
+                
+                SQL = "SELECT scoring_time FROM qa WHERE trainer = %s;"
+                DATA = (name, )
+                cur.execute(SQL, DATA)
+                score_times = cur.fetchall()
+                time_scoring = 0
+                for time in score_times:
+                    if time[0] != None:
+                        time_scoring += int(pytimeparse.parse(str(time[0]))) # type: ignore
+
+                minutes = str(math.floor(time_scoring / 60)) # type: ignore
+                seconds = str(int(time_scoring % 60)) # type: ignore
+                if len(minutes) == 1:
+                    minutes = '0' + minutes
+                if len(seconds) == 1:
+                    seconds = '0' + seconds
+                total_scoring_time = f'0:{minutes}:{seconds}'
+
+                SQL = """SELECT 
+                                AVG(CASE 
+                                    WHEN gen_call_score != 0 THEN gen_call_score 
+                                    WHEN sched_call_score != 0 THEN sched_call_score 
+                                    WHEN complaint_call_score != 0 THEN complaint_call_score 
+                                    WHEN procedure_call_score != 0 THEN procedure_call_score
+                                    WHEN sched_proc_veri_score != 0 THEN sched_proc_veri_score
+                                END) AS overall_avg_non_zero 
+                                FROM qa 
+                                WHERE (trainer = %s AND (upload_date >= %s AND upload_date <= %s));"""
+                DATA = (name, from_date, to_date)
+                cur.execute(SQL, DATA)
+                avg = cur.fetchone()[0] # type: ignore
+
+                # try to get trending info on agents
+                for agent in agents:
+                    SQL = """SELECT 
+                                AVG(CASE 
+                                    WHEN gen_call_score != 0 THEN gen_call_score 
+                                    WHEN sched_call_score != 0 THEN sched_call_score 
+                                    WHEN complaint_call_score != 0 THEN complaint_call_score 
+                                    WHEN procedure_call_score != 0 THEN procedure_call_score
+                                    WHEN sched_proc_veri_score != 0 THEN sched_proc_veri_score
+                                END) AS overall_avg_non_zero
+                                FROM qa 
+                                WHERE (trainer = %s AND agent = %s AND (upload_date >= %s AND upload_date <= %s));"""
+                    DATA = (name, agent, from_date, to_date)
+                    cur.execute(SQL, DATA)
+                    agent_current_average = cur.fetchone()[0] # type: ignore
+
+                    cur.execute("SELECT DATE %s - DATE %s as date_diff;", (to_date, from_date))
+                    date_diff = cur.fetchone()[0] # type: ignore
+
+                    cur.execute("SELECT DATE %s - INTERVAL '%s' as new_from;", (from_date, date_diff))
+                    new_from = cur.fetchone()[0]  # type: ignore
+
+                    SQL = """SELECT 
+                                AVG(CASE 
+                                    WHEN gen_call_score != 0 THEN gen_call_score 
+                                    WHEN sched_call_score != 0 THEN sched_call_score 
+                                    WHEN complaint_call_score != 0 THEN complaint_call_score 
+                                    WHEN procedure_call_score != 0 THEN procedure_call_score
+                                    WHEN sched_proc_veri_score != 0 THEN sched_proc_veri_score
+                                END) AS overall_avg_non_zero
+                                FROM qa 
+                                WHERE (trainer = %s AND agent = %s AND (upload_date >= %s AND upload_date <= %s));"""
+                    DATA = (name, agent, new_from, from_date) # the from_date becomes the new "to" date
+                    cur.execute(SQL, DATA)
+                    agent_past_average = cur.fetchone()[0] # type: ignore
+                    if agent_current_average != None and agent_past_average != None:
+                        if agent_current_average > agent_past_average:
+                            if agent not in trending_up:
+                                trending_up.append(agent)
+                        elif agent_current_average < agent_past_average:
+                            if agent not in trending_down:
+                                trending_down.append(agent)
+                
+                writer.writerow([name, CLINICS[name], ', '.join(agents_scored), avg, calls, date_range, ', '.join(trending_down), ', '.join(trending_up), total_scoring_time]) # type: ignore
+            except Exception as e:
+                ic(e)
+                continue
+    return FileResponse(path='.\qa_report.csv', status_code=200, media_type="csv", filename="qa_report.csv") # type: ignore
 
 def get_trainer_files(trainer) -> list[tuple]:
     con = psycopg2.connect(f'dbname = {CONFIG['credentials']['dbname']} user = {CONFIG['credentials']['username']} password = {CONFIG['credentials']['password']} host = {CONFIG['credentials']['host']}')

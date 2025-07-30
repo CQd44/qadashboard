@@ -17,6 +17,21 @@
 		text-align: center;
 	}
 
+	a.button {
+    padding: 1px 6px;
+    border: 1px outset buttonborder;
+    border-radius: 3px;
+    color: black;
+    background-color: gainsboro;
+    text-decoration: none;
+}
+
+.reports {
+}
+
+.from {
+	display: inline-flex;
+}
 		</style>
 <title>QA Upload</title></head>
 <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
@@ -28,9 +43,148 @@
 	
 	<form method="post" enctype="multipart/form-data" action="/upload">
   <label for="file">File:</label>
-  <div><input id="file" name="file" type="file" /><br><br></div>
-  <div><button class="file">Upload</button></div>
+  <div><input id="file" name="file" type="file" accept=".xlsx"/><br><br></div>
+  <div><button type="submit" value="submit" class="file" disabled>Upload</button></div>
 </form>
+<br><br>
+<h3>Check Uploaded Files</h3>
+	<div class="qas">
+		<br><br>
+	<a href="/monica" class="button">Monica's Uploaded Items for the Day</a>
+	<a href="/juan" class="button">Juan's Uploaded Items for the Day</a>
+	<a href="/eric" class="button">Eric's Uploaded Items for the Day</a>
+	<a href="/daisy" class="button">Daisy's Uploaded Items for the Day</a><br><br><br>
+	<a href="/bianca" class="button">Bianca's Uploaded Items for the Day</a>
+	<a href="/lori" class="button">Lori's Uploaded Items for the Day</a>
+	<a href="/josie" class="button">Josie's Uploaded Items for the Day</a>
+	<a href="/jewlyssa" class="button">Jewlyssa's Uploaded Items for the Day</a><br><br><br>
+	<a href="/gabriel" class="button">Gabriel's Uploaded Items for the Day</a>
+	<a href="/debra" class="button">Debra's Uploaded Items for the Day</a>
+	</div>
+	<br><br><br>
+	<div class="reports">
+		<h3>Run Quality Assurance Reports</h3>
+		<form method="post" action="/report">
+		<p>From:</p>
+		<div class="from">
+		<select name="month_from" id="month_from" required class="month_from">
+			<option value="1">January</option>
+			<option value="2">February</option>
+			<option value="3">March</option>
+			<option value="4">April</option>
+			<option value="5">May</option>
+			<option value="6">June</option>
+			<option value="7">July</option>
+			<option value="8">August</option>
+			<option value="9">September</option>
+			<option value="10">October</option>
+			<option value="11">November</option>
+			<option value="12">December</option>
+		</select>
+		<select name="day_from" id="day_from" required class="day_from">
+			<option value="1">1</option>
+			<option value="2">2</option>
+			<option value="3">3</option>
+			<option value="4">4</option>
+			<option value="5">5</option>
+			<option value="6">6</option>
+			<option value="7">7</option>
+			<option value="8">8</option>
+			<option value="9">9</option>
+			<option value="10">10</option>
+			<option value="11">11</option>
+			<option value="12">12</option>
+			<option value="13">13</option>
+			<option value="14">14</option>
+			<option value="15">15</option>
+			<option value="16">16</option>
+			<option value="17">17</option>
+			<option value="18">18</option>
+			<option value="19">19</option>
+			<option value="20">20</option>
+			<option value="21">21</option>
+			<option value="22">22</option>
+			<option value="23">23</option>
+			<option value="24">24</option>
+			<option value="25">25</option>
+			<option value="26">26</option>
+			<option value="27">27</option>
+			<option value="28">28</option>
+			<option value="29">29</option>
+			<option value="30">30</option>
+			<option value="31">31</option>
+			</select>
+		<select name="year_from" id="year_from" required class="year_from">
+			<option value="2025">2025</option>
+			<option value="2026">2026</option>
+		</select>
+		</div>	
+				<p>To:</p>
+		<div class="from">
+		<select name="month_to" id="month_to" required class="month_to">
+			<option value="1">January</option>
+			<option value="2">February</option>
+			<option value="3">March</option>
+			<option value="4">April</option>
+			<option value="5">May</option>
+			<option value="6">June</option>
+			<option value="7">July</option>
+			<option value="8">August</option>
+			<option value="9">September</option>
+			<option value="10">October</option>
+			<option value="11">November</option>
+			<option value="12">December</option>
+		</select>
+		<select name="day_to" id="day_to" required class="day_to">
+			<option value="1">1</option>
+			<option value="2">2</option>
+			<option value="3">3</option>
+			<option value="4">4</option>
+			<option value="5">5</option>
+			<option value="6">6</option>
+			<option value="7">7</option>
+			<option value="8">8</option>
+			<option value="9">9</option>
+			<option value="10">10</option>
+			<option value="11">11</option>
+			<option value="12">12</option>
+			<option value="13">13</option>
+			<option value="14">14</option>
+			<option value="15">15</option>
+			<option value="16">16</option>
+			<option value="17">17</option>
+			<option value="18">18</option>
+			<option value="19">19</option>
+			<option value="20">20</option>
+			<option value="21">21</option>
+			<option value="22">22</option>
+			<option value="23">23</option>
+			<option value="24">24</option>
+			<option value="25">25</option>
+			<option value="26">26</option>
+			<option value="27">27</option>
+			<option value="28">28</option>
+			<option value="29">29</option>
+			<option value="30">30</option>
+			<option value="31">31</option>
+			</select>
+		<select name="year_to" id="year_to" required class="year_to">
+			<option value="2025">2025</option>
+			<option value="2026">2026</option>
+		</select>
+	</div>
+	<br><br> <input type="submit" id="submitbtn" value="Submit">
+	</form>
+	</div>
+
+<script>
+	 document.querySelector("input[type=file]").onchange = ({
+      target: { value },
+    }) => {
+      document.querySelector("button[type=submit]").disabled = !value;
+	};
+
+</script>
 
 </body>
 <!-- Why are you looking at this? :)  ~ Clay-->
