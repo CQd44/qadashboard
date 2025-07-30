@@ -18,6 +18,6 @@ More will be added, but for now this is what it does.
 
 TODO:
 
--Get basic functionality working for all features requested. Need to wait before I know all the aspects of the reporting function work.
--Remove unused variables and items from TOML
--Optimize where possible, eg. using the keys() of the CLINICS dict instead of a separate list of names
+Get basic functionality working for all features requested. Need to wait before I know all the aspects of the reporting function work.
+Remove unused variables and items from TOML
+Optimize where possible, eg. using the keys() of the CLINICS dict instead of a separate list of names
