@@ -14,3 +14,10 @@ The database will be queried and return values mostly based on the CURRENT_DATE 
 The dashboard display some info, namely how many QAs each QA/Trainer has done and what the average score is across the agents those QA/Trainers are scoring. 
 
 More will be added, but for now this is what it does. 
+
+
+TODO:
+
+-Get basic functionality working for all features requested. Need to wait before I know all the aspects of the reporting function work.
+-Remove unused variables and items from TOML
+-Optimize where possible, eg. using the keys() of the CLINICS dict instead of a separate list of names
