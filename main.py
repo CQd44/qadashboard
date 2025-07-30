@@ -2,63 +2,26 @@
 #port 9999
 
 from openpyxl import load_workbook
-from fastapi import FastAPI, Form, Request, UploadFile, File, HTTPException
+from fastapi import FastAPI, Form, Request, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 import psycopg2
 import toml
-from time import localtime, strftime
-from fastapi.staticfiles import StaticFiles
 import aiofiles
-from tempfile import NamedTemporaryFile
 import os.path
 import os
 from datetime import datetime
 import pytimeparse
 import math
 import csv
-from icecream import ic
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static") #logo and favicon go here
-templates = Jinja2Templates(directory="templates") #loads HTML files from this directory
+templates = Jinja2Templates(directory="templates") #load HTML file from this directory
 
 CONFIG = toml.load("./config.toml") #load variables from toml file
-SERVER: str = CONFIG['comms']['server']
-PORT: int = CONFIG['comms']['port']
-FROM: str = CONFIG['comms']['from']
-TO: list[str] = CONFIG['comms']['emails'] #list of emails to send responses to
 CLINICS: dict = CONFIG['qas'] #dict of QA name : clinic mapping
-names: list[str] = CONFIG['qas']['names'] #list of QA names
-
-# Set up postgresql table
-def init_db():
-    con = psycopg2.connect(f'dbname = {CONFIG['credentials']['dbname']} user = {CONFIG['credentials']['username']} password = {CONFIG['credentials']['password']} host = {CONFIG['credentials']['host']}')
-    cur = con.cursor()
-    cur.execute('''CREATE TABLE IF NOT EXISTS qa 
-                (id SERIAL PRIMARY KEY, 
-                agent TEXT,
-                extension TEXT,
-                clinic TEXT,
-                date_time TEXT,
-                phone TEXT,
-                handle_time TEXT,
-                upload_date DATE DEFAULT CURRENT_DATE,
-                gen_call_score INT,
-                sched_call_score INT,
-                complaint_call_score INT,
-                procedure_call_score INT,
-                cust_service_notes TEXT,
-                sched_proc_veri_score INT,
-                trainer TEXT,
-                qa_date DATE,
-                overall_result TEXT,
-                filename TEXT,
-                scoring_time TEXT)
-                ;'''
-            )
-    cur.close()
-    con.commit()
 
 # Home page with the form
 @app.get("/", response_class=HTMLResponse)
@@ -68,21 +31,19 @@ async def get_form(request: Request):
 # Acknowledge file was uploaded and process file!
 @app.post("/upload", response_class=HTMLResponse)
 async def process_file(file: UploadFile):
-    _filename = file.filename
     if not os.path.exists(f'QAs\\{file.filename}'):
         try:
             contents = await file.read()
             async with aiofiles.open(f"QAs\\{file.filename}", 'wb') as f: # type: ignore
                 await f.write(contents)
         except Exception as e:
-            raise HTTPException(status_code=500, detail='Something went wrong')
+            raise HTTPException(status_code=500, detail=f'Something went wrong. Tell Clay! {e}')
         finally:
             await file.close()
         wb = load_workbook(filename= f'QAs\\{file.filename}')  # type: ignore
         sheet_ranges = wb['Sheet1']
 
         try:
-
             agent = sheet_ranges['G2'].value
             if not agent:
                 agent = sheet_ranges['F2'].value.split(":")[-1].strip()
@@ -127,22 +88,18 @@ async def process_file(file: UploadFile):
             try:
                 gen_call_score = int(sheet_ranges['I22'].value.split("/")[0].strip())
             except:
-                print("No general call score.")
                 gen_call_score: int = 0
             try:
                 sched_call_score = int(sheet_ranges['I33'].value.split("/")[0].strip())
             except:
-                print("No scheduling call score.")
                 sched_call_score: int = 0
             try:
                 complaint_call_score = int(sheet_ranges['I44'].value.split("/")[0].strip())
             except:
-                print("No complaint call score.")
                 complaint_call_score: int = 0
             try:
                 procedure_call_score = int(sheet_ranges['I56'].value.split("/")[0].strip())
             except:
-                print("No procedure call score.")
                 procedure_call_score: int = 0
             
             cust_service_notes = ''
@@ -153,7 +110,6 @@ async def process_file(file: UploadFile):
             try:
                 sched_proc_veri_score = int(sheet_ranges['I83'].value.split("/")[0].strip())
             except:
-                print("No scheduling/procedure verification call score.")
                 sched_proc_veri_score: int = 0
 
             verification_notes = ''
@@ -238,7 +194,7 @@ async def process_file(file: UploadFile):
             <body>
             <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
                 <h2>File  uploaded!</h2>
-                <p>You uploaded: %s <br></p>""" % (_filename, )
+                <p>You uploaded: %s <br></p>""" % (file.filename, )
 
             for item in files_today:
                 html_content += f"""
@@ -259,8 +215,7 @@ async def process_file(file: UploadFile):
         sheet_ranges = wb['Sheet1']
         trainer_cell = sheet_ranges['A104'].value.split(":")
         trainer = trainer_cell[-1].strip()
-        files_today = get_trainer_files(trainer)
-        
+        files_today = get_trainer_files(trainer)        
         html_content = """
         <html>
         <head>            
@@ -288,7 +243,6 @@ async def process_file(file: UploadFile):
             <p>Please go back and select a different file.</p>
             <p>You've already uploaded these files:</p>""" % (file.filename, )
 
-        print("File already uploaded!")
         for item in files_today:
             html_content += f"""
             {item[0]}<br>"""
@@ -368,7 +322,7 @@ async def read_root():
                 </tr>
     """ % (datetime.now().strftime("%I:%M %p"),) 
 
-    for name in names:
+    for name in CLINICS.keys():
         clinic: str = CLINICS[name]
 
         running_total = get_running_total(name)
@@ -376,10 +330,12 @@ async def read_root():
         weekly_progress = (round(running_total / 200, 2) * 100)
 
         count = get_daily_qa_count(name)
+
         try:
             average_score = round(get_average_score(name), 2)
         except: #catches if QA has not scored anyone yet
             average_score = 0
+        
         if average_score <= 80:
             color = 'red'
         elif average_score <= 90:
@@ -412,395 +368,46 @@ async def read_root():
 
     return HTMLResponse(content=html_content)
 
+#endpoints for all the trainers to view what files they uploaded that day
 @app.get("/monica", response_class=HTMLResponse)
 async def monica_files(request: Request):
-    monica_files = get_trainer_files("Monica Estrada")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Monica's Uploaded Files for the Day</h2>"""                
-
-    for item in monica_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+    return file_check(request)
 
 @app.get("/juan", response_class=HTMLResponse)
 async def juan_files(request: Request):
-    juan_files = get_trainer_files("Juan I. Recio")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Juan's Uploaded Files for the Day</h2>"""                
-
-    for item in juan_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+    return file_check(request)
 
 @app.get("/eric", response_class=HTMLResponse)
 async def eric_files(request: Request):
-    eric_files = get_trainer_files("Eric Gaona")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Eric's Uploaded Files for the Day</h2>"""                
-
-    for item in eric_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+    return file_check(request)
 
 @app.get("/daisy", response_class=HTMLResponse)
 async def daisy_files(request: Request):
-    daisy_files = get_trainer_files("Daisy Colin")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Daisy's Uploaded Files for the Day</h2>"""                
-
-    for item in daisy_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+    return file_check(request)
 
 @app.get("/bianca", response_class=HTMLResponse)
-async def biancy_files(request: Request):
-    bianca_files = get_trainer_files("Bianca Garcia")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Bianca's Uploaded Files for the Day</h2>"""                
-
-    for item in bianca_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+async def bianca_files(request: Request):
+    return file_check(request)
 
 @app.get("/lori", response_class=HTMLResponse)
 async def lori_files(request: Request):
-    lori_files = get_trainer_files("Lori Muniz")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Lori's Uploaded Files for the Day</h2>"""                
-
-    for item in lori_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+    return file_check(request)    
 
 @app.get("/josie", response_class=HTMLResponse)
 async def josie_files(request: Request):
-    josie_files = get_trainer_files("Josefina Molina")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Josie's Uploaded Files for the Day</h2>"""                
-
-    for item in josie_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+    return file_check(request)
 
 @app.get("/jewlyssa", response_class=HTMLResponse)
 async def jewlyssa_files(request: Request):
-    jewlyssa_files = get_trainer_files("Jewlyssa Gonzalez")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Jewlyssa's Uploaded Files for the Day</h2>"""                
-
-    for item in jewlyssa_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+    return file_check(request)
 
 @app.get("/gabriel", response_class=HTMLResponse)
 async def gabriel_files(request: Request):
-    gabriel_files = get_trainer_files("Gabriel Mejia")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Gabriel's Uploaded Files for the Day</h2>"""                
-
-    for item in gabriel_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+    return file_check(request)
 
 @app.get("/debra", response_class=HTMLResponse)
 async def debra_files(request: Request):
-    debra_files = get_trainer_files("Debra Carrion")
-    html_content = """
-            <html>
-            <head>            
-                <style>
-                body {
-            margin: 0;
-            display: grid;
-            min-height: 10vh;
-            place-items: center;
-            background-color: lightgray;
-        }
-        div {
-            text-align: center;
-        }
-
-        p, button {
-            text-align: center;
-        }
-                </style>
-            </head>
-            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-            <body>
-            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>Debra's Uploaded Files for the Day</h2>"""                
-
-    for item in debra_files:
-        html_content += f"""
-        {item[0]}<br>"""
-
-    html_content += """<p>To upload a file, click the link below.</p>
-        <div><a href="/" class="active">Go back</a></div>
-        </body>
-        </html>"""
-
-    return HTMLResponse(content=html_content)
+    return file_check(request)
 
 @app.post("/report")
 async def run_report(month_from: int = Form(...), day_from: int = Form(...), year_from: int = Form(...), month_to: int = Form(...), day_to: int = Form(...), year_to: int = Form(...)):
@@ -810,10 +417,48 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
     from_date = str(year_from) + "-" + str(month_from) + "-" + str(day_from)
     to_date = str(year_to) + "-" + str(month_to) + "-" + str(day_to)
 
+    if datetime.strptime(to_date, '%Y-%m-%d') < datetime.strptime(from_date, '%Y-%m-%d'):
+        html_content="""
+<html>
+        <head>            
+            <style>
+            body {
+		margin: 0;
+		display: grid;
+		place-items: center;
+		background-color: lightgray;
+	}
+	div {
+		text-align: center;
+	}
+
+	p, button {
+		text-align: center;
+	}
+            </style>
+        </head>
+        <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+        <body>
+        <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
+            <h2>Report range error!</h2>
+            <p>Please go back and check your report range and make sure the "From" date is before or the same as the "To" date</p>
+            <p><div><a href="/" class="active">Go back</a></div>
+            </body>
+            </html>            
+            """
+        return HTMLResponse(content=html_content)
+
     with open('qa_report.csv', 'w', newline = '') as output:
+        
+        cur.execute("SELECT DATE %s - DATE %s as date_diff;", (to_date, from_date))
+        date_diff = cur.fetchone()[0] # type: ignore
+
+        cur.execute("SELECT DATE %s - INTERVAL '%s DAYS' as new_from;", (from_date, date_diff))
+        new_from = cur.fetchone()[0]  # type: ignore
+        
         writer = csv.writer(output)
         writer.writerow(["QA Name", "Clinics", "Agents Scored", "Average Score", "Number of Calls", "Date Range", "Agents Trending Download in Score", "Agents Trending Upward in Score", "Total Time Scoring Calls"])
-        for name in names:
+        for name in CLINICS.keys():
             try:
                 SQL = "SELECT agent FROM qa WHERE (trainer = %s AND (upload_date >= %s AND upload_date <= %s));"
                 DATA = (name, from_date, to_date)
@@ -834,15 +479,14 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
 
                 date_range = from_date + ' - ' + to_date
                 
-                SQL = "SELECT scoring_time FROM qa WHERE trainer = %s;"
-                DATA = (name, )
+                SQL = "SELECT scoring_time FROM qa WHERE (trainer = %s AND (upload_date >= %s AND upload_date <= %s));"
+                DATA = (name, from_date, to_date)
                 cur.execute(SQL, DATA)
                 score_times = cur.fetchall()
-                time_scoring = 0
+                time_scoring = 0                
                 for time in score_times:
                     if time[0] != None:
-                        time_scoring += int(pytimeparse.parse(str(time[0]))) # type: ignore
-
+                        time_scoring += int(pytimeparse.parse(time[0])) # type: ignore             
                 minutes = str(math.floor(time_scoring / 60)) # type: ignore
                 seconds = str(int(time_scoring % 60)) # type: ignore
                 if len(minutes) == 1:
@@ -863,7 +507,10 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
                                 WHERE (trainer = %s AND (upload_date >= %s AND upload_date <= %s));"""
                 DATA = (name, from_date, to_date)
                 cur.execute(SQL, DATA)
-                avg = cur.fetchone()[0] # type: ignore
+                try:
+                    avg = round(cur.fetchone()[0], 2) # type: ignore
+                except Exception as e:
+                    avg = 0
 
                 # try to get trending info on agents
                 for agent in agents:
@@ -881,12 +528,6 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
                     cur.execute(SQL, DATA)
                     agent_current_average = cur.fetchone()[0] # type: ignore
 
-                    cur.execute("SELECT DATE %s - DATE %s as date_diff;", (to_date, from_date))
-                    date_diff = cur.fetchone()[0] # type: ignore
-
-                    cur.execute("SELECT DATE %s - INTERVAL '%s' as new_from;", (from_date, date_diff))
-                    new_from = cur.fetchone()[0]  # type: ignore
-
                     SQL = """SELECT 
                                 AVG(CASE 
                                     WHEN gen_call_score != 0 THEN gen_call_score 
@@ -902,17 +543,49 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
                     agent_past_average = cur.fetchone()[0] # type: ignore
                     if agent_current_average != None and agent_past_average != None:
                         if agent_current_average > agent_past_average:
-                            if agent not in trending_up:
-                                trending_up.append(agent)
+                            if agent[0] not in trending_up:
+                                trending_up.append(agent[0])
                         elif agent_current_average < agent_past_average:
-                            if agent not in trending_down:
-                                trending_down.append(agent)
+                            if agent[0] not in trending_down:
+                                trending_down.append(agent[0])
                 
                 writer.writerow([name, CLINICS[name], ', '.join(agents_scored), avg, calls, date_range, ', '.join(trending_down), ', '.join(trending_up), total_scoring_time]) # type: ignore
             except Exception as e:
                 ic(e)
                 continue
+    
+    cur.close()
+    con.close()    
     return FileResponse(path='.\qa_report.csv', status_code=200, media_type="csv", filename="qa_report.csv") # type: ignore
+
+# Set up postgresql table
+def init_db():
+    con = psycopg2.connect(f'dbname = {CONFIG['credentials']['dbname']} user = {CONFIG['credentials']['username']} password = {CONFIG['credentials']['password']} host = {CONFIG['credentials']['host']}')
+    cur = con.cursor()
+    cur.execute('''CREATE TABLE IF NOT EXISTS qa 
+                (id SERIAL PRIMARY KEY, 
+                agent TEXT,
+                extension TEXT,
+                clinic TEXT,
+                date_time TEXT,
+                phone TEXT,
+                handle_time TEXT,
+                upload_date DATE DEFAULT CURRENT_DATE,
+                gen_call_score INT,
+                sched_call_score INT,
+                complaint_call_score INT,
+                procedure_call_score INT,
+                cust_service_notes TEXT,
+                sched_proc_veri_score INT,
+                trainer TEXT,
+                qa_date DATE,
+                overall_result TEXT,
+                filename TEXT,
+                scoring_time TEXT)
+                ;'''
+            )
+    cur.close()
+    con.commit()
 
 def get_trainer_files(trainer) -> list[tuple]:
     con = psycopg2.connect(f'dbname = {CONFIG['credentials']['dbname']} user = {CONFIG['credentials']['username']} password = {CONFIG['credentials']['password']} host = {CONFIG['credentials']['host']}')
@@ -920,6 +593,8 @@ def get_trainer_files(trainer) -> list[tuple]:
     SQL = "SELECT filename FROM qa WHERE (trainer = %s AND upload_date = CURRENT_DATE);"
     cur.execute(SQL, (trainer,))
     files = cur.fetchall()
+    cur.close()
+    con.close()
     return files
 
 def get_daily_qa_count(name) -> int:
@@ -966,3 +641,44 @@ def get_running_total(name) -> int:
     cur.close()
     con.close()
     return running_total
+
+def file_check(request: Request):
+    for key in CLINICS.keys():
+        if str(request.url).split("/")[-1] in key.split(" ")[0].lower():
+            name = key
+    trainer_files = get_trainer_files(name) # type: ignore
+    html_content = """
+            <html>
+            <head>            
+                <style>
+                body {
+            margin: 0;
+            display: grid;
+            min-height: 10vh;
+            place-items: center;
+            background-color: lightgray;
+        }
+        div {
+            text-align: center;
+        }
+
+        p, button {
+            text-align: center;
+        }
+                </style>
+            </head>
+            <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+            <body>
+            <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
+                <h2>%s's Uploaded Files for the Day</h2>""" % (str(request.url).split("/")[-1].title())                # type: ignore
+
+    for item in trainer_files:
+        html_content += f"""
+        {item[0]}<br>"""
+
+    html_content += """<p>To upload a file, click the link below.</p>
+        <div><a href="/" class="active">Go back</a></div>
+        </body>
+        </html>"""
+
+    return HTMLResponse(content=html_content)
