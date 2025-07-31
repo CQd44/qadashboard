@@ -1,4 +1,5 @@
-#QA side of the QA dashboards
+#QA dashboard and QA score processing
+#Very basic, but works!
 #port 9999
 
 from openpyxl import load_workbook
@@ -8,24 +9,25 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import psycopg2
 import toml
-import aiofiles
+import aiofiles # type: ignore
 import os.path
 import os
 from datetime import datetime
 import pytimeparse
 import math
 import csv
+from icecream import ic
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static") #logo and favicon go here
 templates = Jinja2Templates(directory="templates") #load HTML file from this directory
 
 CONFIG = toml.load("./config.toml") #load variables from toml file
-CLINICS: dict = CONFIG['qas'] #dict of QA name : clinic mapping
+CLINICS: dict[str, str] = CONFIG['qas'] #dict of QA name : clinic mapping
 
 # Home page with the form
 @app.get("/", response_class=HTMLResponse)
-async def get_form(request: Request):
+async def get_form(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("form.html", {"request": request})
 
 # Acknowledge file was uploaded and process file!
@@ -262,7 +264,7 @@ async def startup_event():
         print(e)
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def read_root():    
+async def read_root() -> HTMLResponse:    
     # HTML table with auto-refresh
     html_content = """
     <html>
@@ -410,7 +412,7 @@ async def debra_files(request: Request):
     return file_check(request)
 
 @app.post("/report")
-async def run_report(month_from: int = Form(...), day_from: int = Form(...), year_from: int = Form(...), month_to: int = Form(...), day_to: int = Form(...), year_to: int = Form(...)):
+async def run_report(month_from: int = Form(...), day_from: int = Form(...), year_from: int = Form(...), month_to: int = Form(...), day_to: int = Form(...), year_to: int = Form(...)) -> FileResponse | HTMLResponse:
     con = psycopg2.connect(f'dbname = {CONFIG['credentials']['dbname']} user = {CONFIG['credentials']['username']} password = {CONFIG['credentials']['password']}')
     cur = con.cursor()
 
@@ -449,7 +451,8 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
         return HTMLResponse(content=html_content)
 
     with open('qa_report.csv', 'w', newline = '') as output:
-        
+        team_scoring_time = 0
+
         cur.execute("SELECT DATE %s - DATE %s as date_diff;", (to_date, from_date))
         date_diff = cur.fetchone()[0] # type: ignore
 
@@ -486,14 +489,18 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
                 time_scoring = 0                
                 for time in score_times:
                     if time[0] != None:
-                        time_scoring += int(pytimeparse.parse(time[0])) # type: ignore             
-                minutes = str(math.floor(time_scoring / 60)) # type: ignore
+                        time_scoring += int(pytimeparse.parse(time[0])) # type: ignore                
+                
+                team_scoring_time += time_scoring #add QA team member's time to total time here
+                hours = str(math.floor(time_scoring / 3600))
+                minutes = str(math.floor((time_scoring % 3600) / 60)) # type: ignore
                 seconds = str(int(time_scoring % 60)) # type: ignore
+                
                 if len(minutes) == 1:
                     minutes = '0' + minutes
                 if len(seconds) == 1:
                     seconds = '0' + seconds
-                total_scoring_time = f'0:{minutes}:{seconds}'
+                total_scoring_time = f'{hours}:{minutes}:{seconds}'
 
                 SQL = """SELECT 
                                 AVG(CASE 
@@ -550,13 +557,35 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
                                 trending_down.append(agent[0])
                 
                 writer.writerow([name, CLINICS[name], ', '.join(agents_scored), avg, calls, date_range, ', '.join(trending_down), ', '.join(trending_up), total_scoring_time]) # type: ignore
+               
             except Exception as e:
                 ic(e)
-                continue
-    
+                continue        
+        hours = str(math.floor(team_scoring_time / 3600))
+        minutes = str(math.floor((team_scoring_time % 3600) / 60)) # type: ignore
+        seconds = str(int(team_scoring_time % 60)) # type: ignore
+        
+        
+        if len(minutes) == 1:
+            minutes = '0' + minutes
+        if len(seconds) == 1:
+            seconds = '0' + seconds
+        team_scoring_time = f'{hours}:{minutes}:{seconds}'
+
+        writer.writerow([])
+        writer.writerow(['', '', '', '', '', '', '', "Total time team spent scoring calls:", team_scoring_time])
     cur.close()
     con.close()    
     return FileResponse(path='.\qa_report.csv', status_code=200, media_type="csv", filename="qa_report.csv") # type: ignore
+
+
+"""
+
+Functions
+
+I have separated them from the FastAPI endpoints for ease of working and maintaining this code.
+
+"""
 
 # Set up postgresql table
 def init_db():
@@ -642,7 +671,7 @@ def get_running_total(name) -> int:
     con.close()
     return running_total
 
-def file_check(request: Request):
+def file_check(request: Request) -> HTMLResponse:
     for key in CLINICS.keys():
         if str(request.url).split("/")[-1] in key.split(" ")[0].lower():
             name = key
@@ -670,7 +699,7 @@ def file_check(request: Request):
             <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
             <body>
             <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>%s's Uploaded Files for the Day</h2>""" % (str(request.url).split("/")[-1].title())                # type: ignore
+                <h2>%s's Uploaded Files for the Day</h2>""" % (str(request.url).split("/")[-1].title()) # type: ignore
 
     for item in trainer_files:
         html_content += f"""
