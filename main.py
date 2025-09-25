@@ -42,41 +42,43 @@ async def process_file(file: UploadFile):
             raise HTTPException(status_code=500, detail=f'Something went wrong. Tell Clay! {e}')
         finally:
             await file.close()
-        wb = load_workbook(filename= f'QAs\\{file.filename}')  # type: ignore
+        wb = load_workbook(filename= f'QAs\\{file.filename}', data_only=True)  # data_only is necessary because openpyxl can not evaluate formulas
         sheet_ranges = wb['Sheet1']
 
         try:
-            agent = sheet_ranges['G2'].value
+            agent = sheet_ranges['G1'].value
             if not agent:
-                agent = sheet_ranges['F2'].value.split(":")[-1].strip()
+                agent = sheet_ranges['F1'].value.split(":")[-1].strip()
 
-            extension = str(sheet_ranges['G3'].value)
+            extension = str(sheet_ranges['G2'].value)
 
-            if extension == "None":
-                extension = str(sheet_ranges['F3'].value.split(":")[-1].strip())
+            if not extension:
+                extension = str(sheet_ranges['F2'].value.split(":")[-1].strip())
             if len(extension) == 4:
                 extension = "2" + extension
 
-            clinic = sheet_ranges['G4'].value
+            clinic = sheet_ranges['G3'].value
             if not clinic:
-                clinic = sheet_ranges['F4'].value.split(":")[-1].strip()
+                clinic = sheet_ranges['F3'].value.split(":")[-1].strip()
 
-            date_time = sheet_ranges['G5'].value
+            date_time = sheet_ranges['G4'].value
             if not date_time:
                 date_time = ''
-                date_time_list = sheet_ranges['F5'].value.split(":")
+                date_time_list = sheet_ranges['F4'].value.split(":")
                 date_time_list.pop(0)
                 for item in date_time_list:
                     date_time = date_time + item
 
-            phone = sheet_ranges['G6'].value
+            phone = sheet_ranges['G5'].value
             if not phone:
-                phone = sheet_ranges['F6'].value.split(":")[-1].strip()
+                phone = sheet_ranges['F5'].value.split(":")[-1].strip()
 
-            handle_time = str(sheet_ranges['G7'].value)
-            if not handle_time:
-                handle_time = sheet_ranges['F7'].value.split(":")[-1].strip()
-            
+            try:
+                handle_time = str(sheet_ranges['G6'].value)
+            except Exception as e:
+                os.remove(f'QAs\\{file.filename}')
+                return HTMLResponse(content=f"You forgot the handle time!<br>Error: {e}<br>Go back and put in the handle time for the call and try reuploading the file!")
+
             parsed_time = 1.5 * (pytimeparse.parse(handle_time)) # type: ignore
             minutes = str(math.floor(parsed_time / 60)) # type: ignore
             seconds = str(int(parsed_time % 60)) # type: ignore
@@ -88,59 +90,40 @@ async def process_file(file: UploadFile):
             print(handle_time, scoring_time)
 
             try:
-                gen_call_score = int(sheet_ranges['I22'].value.split("/")[0].strip())
+                gen_call_score = int(sheet_ranges['I21'].value.split("/")[0].strip())
             except:
                 gen_call_score: int = 0
             try:
-                sched_call_score = int(sheet_ranges['I33'].value.split("/")[0].strip())
+                sched_call_score = int(sheet_ranges['I43'].value.split("/")[0].strip())
             except:
                 sched_call_score: int = 0
             try:
-                complaint_call_score = int(sheet_ranges['I44'].value.split("/")[0].strip())
+                complaint_call_score = int(sheet_ranges['I55'].value.split("/")[0].strip())
             except:
                 complaint_call_score: int = 0
             try:
-                procedure_call_score = int(sheet_ranges['I56'].value.split("/")[0].strip())
+                procedure_call_score = int(sheet_ranges['I67'].value.split("/")[0].strip())
             except:
                 procedure_call_score: int = 0
             
-            cust_service_notes = ''
-            for i in range(62, 70):
-                if sheet_ranges[f'A{i}'].value:
-                    cust_service_notes = cust_service_notes + '\n' + sheet_ranges[f'A{i}'].value
             
             try:
                 sched_proc_veri_score = int(sheet_ranges['I83'].value.split("/")[0].strip())
             except:
                 sched_proc_veri_score: int = 0
 
-            verification_notes = ''
-            for i in range(85, 94):
-                if sheet_ranges[f'A{i}'].value:
-                    verification_notes = verification_notes + '\n' + sheet_ranges[f'A{i}'].value
-
-            spec_feedback = ''
-            for i in range(95, 102):
-                if sheet_ranges[f'A{i}'].value:
-                    spec_feedback = spec_feedback + '\n' + sheet_ranges[f'A{i}'].value
-
-            if "Yes" in sheet_ranges['A103'].value:
-                one_on_one = True
-            elif "No" in sheet_ranges['A103'].value:
-                one_on_one = False
-
-            trainer_cell = sheet_ranges['A104'].value.split(":")
+            trainer_cell = sheet_ranges['A97'].value.split(":")
             trainer = trainer_cell[-1].strip()
 
-            super_cell = sheet_ranges['A105'].value.split(":")
-            floor_super = super_cell[-1].strip()
+            if "juan" in trainer.lower():
+                trainer = "Juan I. Recio"
 
-            qa_date = sheet_ranges['G104'].value.split(":")[-1].strip()
+            qa_date = sheet_ranges['G97'].value.split(":")[-1].strip()
             
             if qa_date == None or qa_date == "":
                 qa_date = datetime.today().strftime('%Y-%m-%d')
 
-            overall_result = sheet_ranges['I108'].value
+            overall_result = sheet_ranges['I101'].value
             
             qa_filename = file.filename
 
@@ -215,7 +198,7 @@ async def process_file(file: UploadFile):
     else:
         wb = load_workbook(filename= f'QAs\\{file.filename}')  # type: ignore
         sheet_ranges = wb['Sheet1']
-        trainer_cell = sheet_ranges['A104'].value.split(":")
+        trainer_cell = sheet_ranges['A97'].value.split(":")
         trainer = trainer_cell[-1].strip()
         files_today = get_trainer_files(trainer)        
         html_content = """
@@ -329,7 +312,7 @@ async def read_root() -> HTMLResponse:
 
         running_total = get_running_total(name)
 
-        weekly_progress = (round(running_total / 200, 2) * 100)
+        weekly_progress = round((round(running_total / 200, 2) * 100), 2)
 
         count = get_daily_qa_count(name)
 
@@ -372,47 +355,47 @@ async def read_root() -> HTMLResponse:
 
 #endpoints for all the trainers to view what files they uploaded that day
 @app.get("/monica", response_class=HTMLResponse)
-async def monica_files(request: Request):
+async def monica_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
 @app.get("/juan", response_class=HTMLResponse)
-async def juan_files(request: Request):
+async def juan_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
 @app.get("/eric", response_class=HTMLResponse)
-async def eric_files(request: Request):
+async def eric_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
 @app.get("/daisy", response_class=HTMLResponse)
-async def daisy_files(request: Request):
+async def daisy_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
 @app.get("/bianca", response_class=HTMLResponse)
-async def bianca_files(request: Request):
+async def bianca_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
 @app.get("/lori", response_class=HTMLResponse)
-async def lori_files(request: Request):
+async def lori_files(request: Request) -> HTMLResponse:
     return file_check(request)    
 
 @app.get("/josie", response_class=HTMLResponse)
-async def josie_files(request: Request):
+async def josie_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
 @app.get("/jewlyssa", response_class=HTMLResponse)
-async def jewlyssa_files(request: Request):
+async def jewlyssa_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
 @app.get("/gabriel", response_class=HTMLResponse)
-async def gabriel_files(request: Request):
+async def gabriel_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
 @app.get("/debra", response_class=HTMLResponse)
-async def debra_files(request: Request):
+async def debra_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
-@app.post("/report")
-async def run_report(month_from: int = Form(...), day_from: int = Form(...), year_from: int = Form(...), month_to: int = Form(...), day_to: int = Form(...), year_to: int = Form(...)) -> FileResponse | HTMLResponse:
+@app.post("/report") #Allows user to download a report. Report is mostly static except for the date range.
+async def run_report(month_from: int = Form(...), day_from: int = Form(...), year_from: int = Form(...), month_to: int = Form(...), day_to: int = Form(...), year_to: int = Form(...)) -> FileResponse:
     con = psycopg2.connect(f'dbname = {CONFIG['credentials']['dbname']} user = {CONFIG['credentials']['username']} password = {CONFIG['credentials']['password']}')
     cur = con.cursor()
 
@@ -448,7 +431,7 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
             </body>
             </html>            
             """
-        return HTMLResponse(content=html_content)
+        return HTMLResponse(content=html_content) # type: ignore
 
     with open('qa_report.csv', 'w', newline = '') as output:
         team_scoring_time = 0
@@ -664,7 +647,7 @@ def get_running_total(name) -> int:
     SQL = """SELECT COUNT(*) 
     FROM qa 
     WHERE trainer = %s AND (upload_date >= DATE_TRUNC('week', CURRENT_DATE) AND
-    upload_date < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '7 days')"""
+    upload_date < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '7 days');"""
     cur.execute(SQL, (name,))
     running_total = cur.fetchone()[0] # type: ignore
     cur.close()
