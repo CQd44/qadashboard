@@ -47,31 +47,17 @@ async def process_file(file: UploadFile):
 
         try:
             agent = sheet_ranges['G1'].value
-            if not agent:
-                agent = sheet_ranges['F1'].value.split(":")[-1].strip()
 
             extension = str(sheet_ranges['G2'].value)
 
-            if not extension:
-                extension = str(sheet_ranges['F2'].value.split(":")[-1].strip())
             if len(extension) == 4:
                 extension = "2" + extension
 
             clinic = sheet_ranges['G3'].value
-            if not clinic:
-                clinic = sheet_ranges['F3'].value.split(":")[-1].strip()
 
             date_time = sheet_ranges['G4'].value
-            if not date_time:
-                date_time = ''
-                date_time_list = sheet_ranges['F4'].value.split(":")
-                date_time_list.pop(0)
-                for item in date_time_list:
-                    date_time = date_time + item
 
             phone = sheet_ranges['G5'].value
-            if not phone:
-                phone = sheet_ranges['F5'].value.split(":")[-1].strip()
 
             try:
                 handle_time = str(sheet_ranges['G6'].value)
@@ -87,7 +73,6 @@ async def process_file(file: UploadFile):
             if len(seconds) == 1:
                 seconds = '0' + seconds
             scoring_time = f'0:{minutes}:{seconds}'
-            print(handle_time, scoring_time)
 
             try:
                 gen_call_score = int(sheet_ranges['I21'].value.split("/")[0].strip())
@@ -104,9 +89,7 @@ async def process_file(file: UploadFile):
             try:
                 procedure_call_score = int(sheet_ranges['I67'].value.split("/")[0].strip())
             except:
-                procedure_call_score: int = 0
-            
-            
+                procedure_call_score: int = 0           
             try:
                 sched_proc_veri_score = int(sheet_ranges['I83'].value.split("/")[0].strip())
             except:
@@ -117,6 +100,11 @@ async def process_file(file: UploadFile):
 
             if "juan" in trainer.lower():
                 trainer = "Juan I. Recio"
+
+            if trainer == "" or trainer == None:
+                os.remove(f'QAs\\{file.filename}')
+                return HTMLResponse(content=f"You forgot to enter the QA trainer name!<br>Go back and correct this issue and try reuploading the file!")
+                
 
             qa_date = sheet_ranges['G97'].value.split(":")[-1].strip()
             
