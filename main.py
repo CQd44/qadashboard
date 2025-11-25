@@ -17,6 +17,8 @@ import pytimeparse
 import math
 import csv
 from icecream import ic
+from pydantic import BaseModel
+from typing import List, Tuple
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static") #logo and favicon go here
@@ -24,6 +26,13 @@ templates = Jinja2Templates(directory="templates") #load HTML file from this dir
 
 CONFIG = toml.load("./config.toml") #load variables from toml file
 CLINICS: dict[str, str] = CONFIG['qas'] #dict of QA name : clinic mapping
+PINS: dict[str, str] = CONFIG['pin'] # dict of name : PIN mapping
+CONNECT_STR = f'dbname = {CONFIG['credentials']['dbname']} user = {CONFIG['credentials']['username']} password = {CONFIG['credentials']['password']} host = {CONFIG['credentials']['host']}'
+
+class SelectedRows(BaseModel):
+    selectedRows: List[Tuple[str, str]]
+    name: str
+    pin: str
 
 # Home page with the form
 @app.get("/", response_class=HTMLResponse)
@@ -70,12 +79,14 @@ async def process_file(file: UploadFile):
             seconds = str(int(parsed_time % 60)) # type: ignore
             if len(minutes) == 1:
                 minutes = '0' + minutes
+            if len(minutes) > 2:
+                minutes = '03'
             if len(seconds) == 1:
                 seconds = '0' + seconds
             scoring_time = f'0:{minutes}:{seconds}'
 
             try:
-                gen_call_score = int(sheet_ranges['I21'].value.split("/")[0].strip())
+                gen_call_score = int(sheet_ranges['I19'].value.split("/")[0].strip())
             except:
                 gen_call_score: int = 0
             try:
@@ -95,23 +106,32 @@ async def process_file(file: UploadFile):
             except:
                 sched_proc_veri_score: int = 0
 
-            trainer_cell = sheet_ranges['A97'].value.split(":")
+            trainer_cell = sheet_ranges['A42'].value.split(":")
             trainer = trainer_cell[-1].strip()
 
             if "juan" in trainer.lower():
                 trainer = "Juan I. Recio"
+
+            if "monica" in trainer.lower():
+                trainer = "Monica Estrada"
+
+            if "eric" in trainer.lower():
+                trainer = "Eric Gaona"
+
+            if "daisy" in trainer.lower():
+                trainer = "Daisy Colin"
 
             if trainer == "" or trainer == None:
                 os.remove(f'QAs\\{file.filename}')
                 return HTMLResponse(content=f"You forgot to enter the QA trainer name!<br>Go back and correct this issue and try reuploading the file!")
                 
 
-            qa_date = sheet_ranges['G97'].value.split(":")[-1].strip()
+            qa_date = sheet_ranges['G42'].value.split(":")[-1].strip()
             
             if qa_date == None or qa_date == "":
                 qa_date = datetime.today().strftime('%Y-%m-%d')
 
-            overall_result = sheet_ranges['I101'].value
+            overall_result = sheet_ranges['I46'].value
             
             qa_filename = file.filename
 
@@ -167,6 +187,7 @@ async def process_file(file: UploadFile):
             <body>
             <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
                 <h2>File  uploaded!</h2>
+                <p><div><a href="/" class="active">Go back</a></p></div>
                 <p>You uploaded: %s <br></p>""" % (file.filename, )
 
             for item in files_today:
@@ -186,7 +207,7 @@ async def process_file(file: UploadFile):
     else:
         wb = load_workbook(filename= f'QAs\\{file.filename}')  # type: ignore
         sheet_ranges = wb['Sheet1']
-        trainer_cell = sheet_ranges['A97'].value.split(":")
+        trainer_cell = sheet_ranges['A42'].value.split(":")
         trainer = trainer_cell[-1].strip()
         files_today = get_trainer_files(trainer)        
         html_content = """
@@ -670,15 +691,100 @@ def file_check(request: Request) -> HTMLResponse:
             <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
             <body>
             <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                <h2>%s's Uploaded Files for the Day</h2>""" % (str(request.url).split("/")[-1].title()) # type: ignore
+                <h2>%s's Uploaded Files for the Day</h2>
+                <form id="dynamicForm" method="post" action="/removefiles">
+                <input type="hidden" id="name" name="name" value="%s" />
+<table style="text-align: center; align-items: center;">
+                <tr>
+                    <th>Filename</th>
+                    <th>Remove?</th>
+                </tr>""" % (str(request.url).split("/")[-1].title(), name) # type: ignore
 
     for item in trainer_files:
         html_content += f"""
-        {item[0]}<br>"""
+                        <tr>                        
+                            <td>{item[0]}</td>
+                            <td> <input type="checkbox" data-id="{item[0]}" name="selectedRows"  data-name="{item[0]}">
+                <label for="filename"></label><br></td>
+                        </tr>
+                        """
 
-    html_content += """<p>To upload a file, click the link below.</p>
+    html_content += """</table>
+        <div><label>PIN: <input type = "text" id = "pin" name = "pin" minlength = "4" maxlength="4" required></label><input type="submit" id="submitbtn" value="Submit"></div>
+        </form>
+    <p>To upload a file, click the link below.</p>
         <div><a href="/" class="active">Go back</a></div>
+        
+        <script>
+            document.getElementById("dynamicForm").addEventListener("submit", async (event) => {
+            event.preventDefault(); 
+
+            const nameInput = document.querySelector('#name');
+            const pinInput = document.querySelector('#pin');
+
+            const checkboxes = document.querySelectorAll('input[name="selectedRows"]:checked');
+            const selectedData = Array.from(checkboxes).map(checkbox => [
+                checkbox.dataset.id,
+                checkbox.dataset.name
+            ]);            
+
+            // Get the form's action URL
+            const form = document.getElementById("dynamicForm");
+            const endpoint = form.action;
+
+            const dataToSend = {
+                selectedRows: selectedData, 
+                name: nameInput.value,     
+                pin: pinInput.value       
+            };
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(dataToSend)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log("Server response:", result);
+                    window.location.href = window.location.href;
+                    // Optionally redirect or update UI based on response
+                } else {
+                    console.error("Error submitting data:", response.statusText);
+                    window.location.href = window.location.href;
+                }
+            } catch (error) {
+                console.error("Network error:", error);
+                window.location.href = window.location.href;
+            }
+        });
+
+        </script>               
         </body>
         </html>"""
 
     return HTMLResponse(content=html_content)
+
+@app.post("/removefiles", response_class=HTMLResponse)
+async def remove_files(data: SelectedRows):
+    name = data.name
+    pin = data.pin
+    if pin != PINS[name]:
+        print(f"Incorrect PIN entered for {name}.")
+    else:
+        selected_rows = data.selectedRows
+        con = psycopg2.connect(CONNECT_STR)
+        cur = con.cursor()
+
+        QUERY = "DELETE FROM qa WHERE filename = %s;"
+        for row in selected_rows:
+            DATA = (row[0], )
+            cur.execute(QUERY, DATA)
+            os.remove(f'QAs\\{row[0]}')
+            print(f"Removed file: {row[0]}")
+        cur.close()
+        con.commit()
+        return HTMLResponse(content="How did you get here? Well, the files were removed so... good job!")
