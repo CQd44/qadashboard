@@ -13,9 +13,4 @@ On the /dashboard side of things:
 The database will be queried and return values mostly based on the CURRENT_DATE and the trainer names (defined currently in a list in the script but will eventually be moved to TOML file)
 The dashboard display some info, namely how many QAs each QA/Trainer has done and what the average score is across the agents those QA/Trainers are scoring. 
 
-More will be added, but for now this is what it does. 
-
-
-TODO:
-
--Get basic functionality working for all features requested. Need to wait before I know all the aspects of the reporting function work.
+So far, file removal has been added (along with PIN verification so that QAs can only remove their own files) and the reporting functionality is working as intended, so as long as the QA team is consistent with their QAs. 
