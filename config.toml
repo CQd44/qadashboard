@@ -1,8 +1,8 @@
 [credentials]
-host = '10.200.23.11'
-dbname = 'responses'
-username = 'postgres'
-password = 'postgres'
+host = ''
+dbname = ''
+username = ''
+password = ''
 
 [qas]
 'Monica Estrada' = 'Neurology, Neurosurgery, Neuro Operators'
@@ -12,12 +12,5 @@ password = 'postgres'
 Plastics, Counselling, Orthopedics, Rheumatology"""
 
 'Juan I. Recio' = 'Diabetes and Endocrinology'
-'Bianca Garcia' = 'Urology'
 
-'Lori Muniz' = """ENT, ENT South, Brownsville MSC,
-Weslaco MSC, Rio Grande City MSC"""
 
-'Josefina Molina' = 'All PCPs'
-'Jewlyssa Gonzalez' = 'Oncology'
-'Gabriel Mejia' = 'Gastroenterology'
-'Debra Carrion' = 'All Cardio Clinics'
