@@ -3,8 +3,8 @@
 #port 9999
 
 from openpyxl import load_workbook
-from fastapi import FastAPI, Form, Request, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import psycopg2
@@ -19,6 +19,7 @@ import csv
 from icecream import ic
 from pydantic import BaseModel
 from typing import List, Tuple
+import warnings
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static") #logo and favicon go here
@@ -45,167 +46,193 @@ async def process_file(files: List[UploadFile]):
     filenames: list[str] = []
     error_files: list[str] = []
     prev_uploaded: list[str] = []
-    for file in files:        
-        if not os.path.exists(f'QAs\\{file.filename}'):
-            try:
-                contents = await file.read()
-                async with aiofiles.open(f"QAs\\{file.filename}", 'wb') as f: # type: ignore
-                    await f.write(contents)
-            except Exception as e:
-                error_files.append(file.filename)
-                #raise HTTPException(status_code=500, detail=f'Something went wrong. Tell Clay! {e}\n\n{file.filename}')
-            finally:
-                await file.close()
-            wb = load_workbook(filename= f'QAs\\{file.filename}', data_only=True)  # data_only is necessary because openpyxl can not evaluate formulas
-            sheet_ranges = wb['Sheet1']
-
-            try:
-                agent = sheet_ranges['G1'].value
-                extension = str(sheet_ranges['G2'].value)
-                if len(extension) == 4:
-                    extension = "2" + extension
-                clinic = sheet_ranges['G3'].value
-                date_time = sheet_ranges['G4'].value
-                phone = sheet_ranges['G5'].value
+    try:        
+        for file in files:        
+            if not os.path.exists(f'QAs\\{file.filename}'):
                 try:
-                    handle_time = str(sheet_ranges['G6'].value)
+                    contents = await file.read()
+                    async with aiofiles.open(f"QAs\\{file.filename}", 'wb') as f: # type: ignore
+                        await f.write(contents)
                 except Exception as e:
-                    os.remove(f'QAs\\{file.filename}')
-                    error_files.append(file.filename)
-                    #return HTMLResponse(content=f"You forgot the handle time!<br>Error: {e}<br>Go back and put in the handle time for the call and try reuploading the file: {file.filename}")
-
-                parsed_time = 1.5 * (pytimeparse.parse(handle_time)) # type: ignore
-                minutes = str(math.floor(parsed_time / 60)) # type: ignore
-                seconds = str(int(parsed_time % 60)) # type: ignore
-                if len(minutes) == 1:
-                    minutes = '0' + minutes
-                if len(minutes) > 2:
-                    minutes = '03'
-                if len(seconds) == 1:
-                    seconds = '0' + seconds
-                scoring_time = f'0:{minutes}:{seconds}'
+                    error_files.append(file.filename) # type: ignore
+                    #raise HTTPException(status_code=500, detail=f'Something went wrong. Tell Clay! {e}\n\n{file.filename}')
+                finally:
+                    await file.close()
+                warnings.simplefilter(action='ignore', category=UserWarning)
+                wb = load_workbook(filename= f'QAs\\{file.filename}', data_only=True)  # data_only is necessary because openpyxl can not evaluate formulas
+                sheet_ranges = wb['Scorecard']
                 try:
-                    gen_call_score = int(sheet_ranges['I19'].value.split("/")[0].strip())
-                except:
-                    gen_call_score: int = 0                
+                    agent = sheet_ranges['G1'].value
+                    extension = str(sheet_ranges['G2'].value)
+                    clinic = sheet_ranges['G3'].value.strip()
+                    date_time = str(sheet_ranges['G4'].value) + " " +  str(sheet_ranges['G5'].value) #concat both cells
+                    phone = str(sheet_ranges['G6'].value)
+                    handle_time = str(sheet_ranges['G7'].value)                        
+                    parsed_time = 1.5 * (pytimeparse.parse(handle_time)) # type: ignore
+                    hours =   str(math.floor(parsed_time / 3600))
+                    minutes = str(math.floor(parsed_time / 60)) # type: ignore
+                    seconds = str(int(parsed_time % 60)) # type: ignore
+                    if len(minutes) == 1:
+                        minutes = '0' + minutes
+                    if len(minutes) > 2:
+                        minutes = '03' 
+                    if len(seconds) == 1:
+                        seconds = '0' + seconds
+                    scoring_time = f'{hours}:{minutes}:{seconds}'
+                    ic(scoring_time)
+                    try:
+                        intro = int(sheet_ranges['I21'].value.split("/")[0].strip())
+                    except:
+                        intro: int = 0
 
-                trainer_cell = sheet_ranges['A42'].value.split(":")
-                trainer = trainer_cell[-1].strip()
+                    try:
+                        sched_call_score = int(sheet_ranges['I33'].value.split("/")[0].strip())
+                    except:
+                        sched_call_score: int = 0
 
-                if "juan" in trainer.lower():
-                    trainer = "Juan I. Recio"
+                    try:
+                        resched = int(sheet_ranges['I40'].value.split("/")[0].strip())
+                    except:
+                        resched: int = 0
 
-                if "monica" in trainer.lower():
-                    trainer = "Monica Estrada"
+                    try:
+                        confirm = int(sheet_ranges['I47'].value.split("/")[0].strip())
+                    except:
+                        confirm: int = 0  
 
-                if "eric" in trainer.lower():
-                    trainer = "Eric Gaona"
+                    try:
+                        clinical = int(sheet_ranges['I71'].value.split("/")[0].strip())
+                    except:
+                        clinical: int = 0  
 
-                if "daisy" in trainer.lower():
-                    trainer = "Daisy Colin"
+                    try:
+                        complaint = int(sheet_ranges['I59'].value.split("/")[0].strip())
+                    except:
+                        complaint: int = 0                
 
-                if trainer == "" or trainer == None:
-                    os.remove(f'QAs\\{file.filename}')
-                    error_files.append(file.filename)
-                    #return HTMLResponse(content=f"You forgot to enter the QA trainer name!<br>Go back and correct this issue and try reuploading the file!")                    
+                    trainer_cell = sheet_ranges['A92'].value.split(":")
+                    trainer = trainer_cell[-1].strip()
 
-                qa_date = sheet_ranges['G42'].value.split(":")[-1].strip()
-                
-                if qa_date == None or qa_date == "":
-                    qa_date = datetime.today().strftime('%Y-%m-%d')
+                    if "juan" in trainer.lower():
+                        trainer = "Juan I. Recio"
 
-                overall_result = sheet_ranges['I46'].value
-                
-                qa_filename = file.filename
+                    if "monica" in trainer.lower():
+                        trainer = "Monica Estrada"
 
-                con = psycopg2.connect(CONNECT_STR)
-                cur = con.cursor()
-                QUERY = '''INSERT INTO qa 
-                        (agent,
-                        extension,
-                        clinic,
-                        date_time,
-                        phone,
-                        handle_time,
-                        gen_call_score,
-                        trainer,
-                        qa_date,
-                        overall_result,
-                        filename,
-                        scoring_time)
-                        VALUES 
-                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);'''
-                DATA = (agent, extension, clinic, date_time, phone, handle_time, gen_call_score, trainer, qa_date, overall_result, qa_filename, scoring_time)
-                cur.execute(QUERY, DATA)
-                cur.close()
-                con.commit()
+                    if "eric" in trainer.lower():
+                        trainer = "Eric Gaona"
 
-                files_today = get_trainer_files(trainer)
+                    if "daisy" in trainer.lower():
+                        trainer = "Daisy Colin"
 
-                html_content = """
-                <html>
-                <head>            
-                    <style>
-                    body {
-                margin: 0;
-                display: grid;
-                min-height: 10vh;
-                place-items: center;
-                background-color: lightgray;
-            }
-            div {
-                text-align: center;
-            }
+                    if trainer == "" or trainer == None:
+                        os.remove(f'QAs\\{file.filename}')
+                        error_files.append(file.filename) # type: ignore
+                        
+                    qa_date = sheet_ranges['G92'].value.split(":")[-1].strip()
+                    
+                    if qa_date == None or qa_date == "":
+                        qa_date = datetime.today().strftime('%Y-%m-%d')
 
-            p, button {
-                text-align: center;
-            }
-                    </style>
-                </head>
-                <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
-                <body>
-                <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
-                    <h2>File  uploaded!</h2>
-                    <p><div><a href="/" class="active">Go back</a></p></div>
-                    <p>You uploaded:<br></p>""" 
-                filenames.append(file)
-                for item in filenames:
-                    html_content += f"{item.filename}<br>"
+                    overall_result = sheet_ranges['I95'].value
+                    
+                    qa_filename = file.filename
 
-                if len(error_files) > 0:
-                    html_content += "<p>These files had some kind of issue and they need to be fixed:</p>"
-                    for item in error_files:
-                        html_content += f"{item.filename}<br>"
-                if len(prev_uploaded) > 0:
-                    html_content += "<p>These files were previously uploaded: </p>"
-                    for item in prev_uploaded:
-                        html_content += f"{item.filename}<br>"
+                    ic(agent, extension, clinic, date_time, phone, handle_time, intro, sched_call_score, resched, confirm, clinical, complaint, trainer, qa_date, overall_result, qa_filename, scoring_time)
+                    con = psycopg2.connect(CONNECT_STR)
+                    cur = con.cursor()
+                    QUERY = '''INSERT INTO qa 
+                            (agent,
+                            extension,
+                            clinic,
+                            date_time,
+                            phone,
+                            handle_time,
+                            intro,
+                            sched_call_score,
+                            resched,
+                            confirm,
+                            clinical,
+                            complaint_call_score,
+                            trainer,
+                            qa_date,
+                            overall_result,
+                            filename,
+                            scoring_time)
+                            VALUES 
+                            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);'''
+                    DATA = (agent, extension, clinic, date_time, phone, handle_time, intro, sched_call_score, resched, confirm, clinical, complaint, trainer, qa_date, overall_result, qa_filename, scoring_time)
+                    cur.execute(QUERY, DATA)
+                    cur.close()
+                    con.commit()
 
-                html_content += "<p>Today you've uploaded: </p>"
+                    files_today = get_trainer_files(trainer)
 
-                for item in files_today:
-                    html_content += f"{item[0]}<br>"
+                    html_content = """
+                    <html>
+                    <head>            
+                        <style>
+                        body {
+                    margin: 0;
+                    display: grid;
+                    min-height: 10vh;
+                    place-items: center;
+                    background-color: lightgray;
+                }
+                div {
+                    text-align: center;
+                }
 
-                html_content += """<p>To upload another file, click the link below.</p>
-                    <div><a href="/" class="active">Go back</a></div>
-                    </body>
-                    </html>
-        """
-                
-                #return HTMLResponse(content=html_content)
-            except Exception as e:
-                print(file)
-                try:
-                    os.remove(f'QAs\\{file.filename}')
-                except:
-                    print("Unable to remove file.")
-                error_files.append(file.filename)
-                #return HTMLResponse(content=f"Tell Clay about this!\n\n{e}\n\nShow him that error and the file you tried!")
-        else:
-            prev_uploaded.append(file.filename)
-    return HTMLResponse(content=html_content)
+                p, button {
+                    text-align: center;
+                }
+                        </style>
+                    </head>
+                    <link rel="icon" type = "image/x-icon" href="/static/favicon.ico">
+                    <body>
+                    <div><img src="/static/dhr-logo.png" alt = "DHR Logo" width = "320px" height = "87.5px"></div>
+                        <h2>File  uploaded!</h2>
+                        <p><div><a href="/" class="active">Go back</a></p></div>
+                        <p>You uploaded:<br></p>""" 
+                    filenames.append(file) # type: ignore
+                    for item in filenames:
+                        html_content += f"{item.filename}<br>" # type: ignore
+
+                    if len(error_files) > 0:
+                        html_content += "<p>These files had some kind of issue and they need to be fixed:</p>"
+                        for item in error_files:
+                            html_content += f"{item.filename}<br>" # type: ignore
+                    if len(prev_uploaded) > 0:
+                        html_content += "<p>These files were previously uploaded: </p>"
+                        for item in prev_uploaded:
+                            html_content += f"{item.filename}<br>" # type: ignore
+
+                    html_content += "<p>Today you've uploaded: </p>"
+
+                    for item in files_today:
+                        html_content += f"{item[0]}<br>"
+
+                    html_content += """<p>To upload another file, click the link below.</p>
+                        <div><a href="/" class="active">Go back</a></div>
+                        </body>
+                        </html>
+            """
+                    
+                    #return HTMLResponse(content=html_content)
+                except Exception as e:
+                    print(file)
+                    try:
+                        os.remove(f'QAs\\{file.filename}')
+                    except:
+                        print("Unable to remove file.")
+                    error_files.append(file.filename) # type: ignore
+                    #return HTMLResponse(content=f"Tell Clay about this!\n\n{e}\n\nShow him that error and the file you tried!")
+            else:
+                prev_uploaded.append(file.filename) # type: ignore
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        return HTMLResponse(content=f"Something went wrong! Tell Clay! {e}")
         
-
 # Initialize the database table when the app starts
 @app.on_event("startup")
 async def startup_event():
@@ -215,7 +242,10 @@ async def startup_event():
         print(e)
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def read_root() -> HTMLResponse:    
+async def read_root() -> HTMLResponse:
+    CONFIG = toml.load("./config.toml")
+    _GOALS: dict = CONFIG['goals']  
+
     # HTML table with auto-refresh
     html_content = """
     <html>
@@ -225,6 +255,7 @@ async def read_root() -> HTMLResponse:
             h2 {
             font-size: 40px;
             }
+            
             body {
 		margin: 0;
         padding: 0;
@@ -251,6 +282,17 @@ async def read_root() -> HTMLResponse:
     font-size: 24px;
     }
 
+    a.button {
+            text-align: center;
+            place-items: center;
+            padding: 1px 6px;
+            border: 1px outset buttonborder;
+            border-radius: 3px;
+            color: black;
+            background-color: gainsboro;
+            text-decoration: none;
+            }
+
     td {
     background-color: white;
     border: 2px solid;
@@ -275,7 +317,11 @@ async def read_root() -> HTMLResponse:
                 </tr>
     """ % (datetime.now().strftime("%I:%M %p"),) 
 
+    total_today: float = 0 #needed to find weighted averages
+    num_of_scores: int = 0
+
     for name in CLINICS.keys():
+        goal = _GOALS[name]
         clinic: str = CLINICS[name]
 
         running_total = get_running_total(name)
@@ -283,12 +329,14 @@ async def read_root() -> HTMLResponse:
         weekly_progress = round((round(running_total / 200, 2) * 100), 2)
 
         count = get_daily_qa_count(name)
+        num_of_scores += count
 
         try:
             average_score = round(get_average_score(name), 2)
+            total_today += round((average_score * count), 2)
         except: #catches if QA has not scored anyone yet
             average_score = 0
-        
+                    
         if average_score <= 80:
             color = 'red'
         elif average_score <= 90:
@@ -296,7 +344,7 @@ async def read_root() -> HTMLResponse:
         else:
             color = 'green'
 
-        if running_total == 200:
+        if running_total >= 200:
             color2 = 'green'
         else:
             color2 = 'red'
@@ -305,21 +353,158 @@ async def read_root() -> HTMLResponse:
                 <tr>
                     <td>{clinic}</td>
                     <td>{name}</td>
-                    <td>{count} / 40</td>
+                    <td>{count} / {goal}</td>
                     <td style="color: {color}"><b>{average_score}</b></td>
                     <td style="color: {color2}">{weekly_progress}%</td>
                     <td>200</td
                 </tr>
         """
+    if num_of_scores > 0:
+        average_score_today = round((total_today / num_of_scores), 2)
+        if average_score_today <= 80:
+            color = 'red'
+        elif average_score_today <= 90:
+            color = 'orange'
+        else:
+            color = 'green'
+    else:
+        color = 'black'
+        average_score_today = "-"
+
+    html_content += f"""
+                    <tr>
+                        <td></td>
+                        <td>Total:</td>
+                        <td>{num_of_scores}</td>
+                        <td style="color: {color}"><b>{average_score_today}</b></td>
+                        <td></td>
+                        <td></td>
+                    </tr>
+        """
 
     html_content += """
             </table>
+            <div style="padding-top: 5% ;text-align: center; place-items: center;"><a class="button" href="/" class="button">Go Back</a></div>
         </body>
         <!-- Clay was here! :) -->
     </html>
     """
-
     return HTMLResponse(content=html_content)
+
+@app.get("/agents")
+async def get_agents(request: Request) -> JSONResponse:
+    con = psycopg2.connect(CONNECT_STR)
+    cur = con.cursor()
+    QUERY = "SELECT DISTINCT(agent) FROM qa ORDER BY agent;"
+    cur.execute(QUERY)
+    results = cur.fetchall()
+    agent_dict = {agent[0] : agent[0] for agent in results}
+    return JSONResponse(content=agent_dict)
+
+@app.post("/agenthistory")
+async def gethistory(request: Request, agentname: str = Form(...), pin: str = Form(...)):
+    auth_pin = CONFIG["pin"]['Agent Check']
+    if pin != auth_pin:
+        return HTMLResponse(content="INVALID PIN")
+    else:
+        con = psycopg2.connect(CONNECT_STR)
+        cur = con.cursor()
+        QUERY = "SELECT agent, upload_date, intro, sched_call_score, complaint_call_score, confirm, clinical, resched FROM qa WHERE (agent = %s AND upload_date >= '1-1-2026');"
+        DATA = (agentname, )
+        cur.execute(QUERY, DATA)
+        results = cur.fetchall()
+        ic(results)
+        scores = []
+        dates = []
+        for result in results:
+            score = 0
+            for i in range(2, 8):
+                try:
+                    score += result[i]
+                except:
+                    continue
+            if score > 0:
+                dates.append(str(result[1]))
+                scores.append(score)
+        html_content = """
+     <html>
+     <head>
+     <style>
+
+     	a.button {
+            text-align: center;
+            place-items: center;
+            padding: 1px 6px;
+            border: 1px outset buttonborder;
+            border-radius: 3px;
+            color: black;
+            background-color: gainsboro;
+            text-decoration: none;
+            }
+     </style>
+
+    <script src="https://cdn.plot.ly/plotly-3.3.0.min.js" charset="utf-8"></script>
+    <body style="background-color: lightgray;">
+        <div style="height: 90vh; place-items: center;">
+        <div></div>
+        <div id="plot" style="background-color: lightgray; width:80vw; height: 80vh;"></div>
+        </div>
+        <script>
+
+const trace1 = {
+    x: %s,
+    y: %s,
+    type: 'scatter',
+    mode: 'markers',
+    marker: {
+    size: 60
+    }
+};
+
+var data = [trace1];
+
+var layout = {
+    title: { 
+    text: '%s QA Scores Over Time',
+    font: {
+        family: 'Calibri',
+        size: 24
+            }
+        },
+    xaxis: {
+        type: 'date',
+        title: {
+        font: {
+        family: 'Calibri',
+        size: 24
+            },
+        text: 'Date'
+        }
+    },
+    yaxis: {
+        title: {
+        font: {
+        family: 'Calibri',
+        size: 24
+            },
+        text: 'Scores'
+        }
+    },
+    autosize: true,
+    margin: { t : 50}
+};
+
+var config = {
+    responsive: true
+};
+
+Plotly.newPlot('plot', data, layout, config);
+        </script>
+        <div style="text-align: center; place-items: center;"><a class="button" href="/" class="button">Go Back</a></div>
+        </body>
+        </html>
+""" % (dates, scores, agentname)
+        return HTMLResponse(content=html_content)
 
 #endpoints for all the trainers to view what files they uploaded that day
 @app.get("/monica", response_class=HTMLResponse)
@@ -336,30 +521,6 @@ async def eric_files(request: Request) -> HTMLResponse:
 
 @app.get("/daisy", response_class=HTMLResponse)
 async def daisy_files(request: Request) -> HTMLResponse:
-    return file_check(request)
-
-@app.get("/bianca", response_class=HTMLResponse)
-async def bianca_files(request: Request) -> HTMLResponse:
-    return file_check(request)
-
-@app.get("/lori", response_class=HTMLResponse)
-async def lori_files(request: Request) -> HTMLResponse:
-    return file_check(request)    
-
-@app.get("/josie", response_class=HTMLResponse)
-async def josie_files(request: Request) -> HTMLResponse:
-    return file_check(request)
-
-@app.get("/jewlyssa", response_class=HTMLResponse)
-async def jewlyssa_files(request: Request) -> HTMLResponse:
-    return file_check(request)
-
-@app.get("/gabriel", response_class=HTMLResponse)
-async def gabriel_files(request: Request) -> HTMLResponse:
-    return file_check(request)
-
-@app.get("/debra", response_class=HTMLResponse)
-async def debra_files(request: Request) -> HTMLResponse:
     return file_check(request)
 
 @app.post("/report") #Allows user to download a report. Report is mostly static except for the date range.
@@ -454,15 +615,10 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
                 total_scoring_time = f'{hours}:{minutes}:{seconds}'
 
                 SQL = """SELECT 
-                                AVG(CASE 
-                                    WHEN gen_call_score != 0 THEN gen_call_score 
-                                    WHEN sched_call_score != 0 THEN sched_call_score 
-                                    WHEN complaint_call_score != 0 THEN complaint_call_score 
-                                    WHEN procedure_call_score != 0 THEN procedure_call_score
-                                    WHEN sched_proc_veri_score != 0 THEN sched_proc_veri_score
-                                END) AS overall_avg_non_zero 
-                                FROM qa 
-                                WHERE (trainer = %s AND (upload_date >= %s AND upload_date <= %s));"""
+                            AVG(intro + sched_call_score + complaint_call_score + confirm + clinical + resched) AS overall_avg
+                        FROM qa 
+                        WHERE trainer = %s 
+                        AND upload_date BETWEEN %s AND %s;"""
                 DATA = (name, from_date, to_date)
                 cur.execute(SQL, DATA)
                 try:
@@ -473,29 +629,19 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
                 # try to get trending info on agents
                 for agent in agents:
                     SQL = """SELECT 
-                                AVG(CASE 
-                                    WHEN gen_call_score != 0 THEN gen_call_score 
-                                    WHEN sched_call_score != 0 THEN sched_call_score 
-                                    WHEN complaint_call_score != 0 THEN complaint_call_score 
-                                    WHEN procedure_call_score != 0 THEN procedure_call_score
-                                    WHEN sched_proc_veri_score != 0 THEN sched_proc_veri_score
-                                END) AS overall_avg_non_zero
-                                FROM qa 
-                                WHERE (trainer = %s AND agent = %s AND (upload_date >= %s AND upload_date <= %s));"""
+                            AVG(intro + sched_call_score + complaint_call_score + confirm + clinical + resched) AS overall_avg 
+                        FROM qa 
+                        WHERE (trainer = %s AND agent = %s
+                        AND upload_date BETWEEN %s AND %s);"""
                     DATA = (name, agent, from_date, to_date)
                     cur.execute(SQL, DATA)
                     agent_current_average = cur.fetchone()[0] # type: ignore
 
                     SQL = """SELECT 
-                                AVG(CASE 
-                                    WHEN gen_call_score != 0 THEN gen_call_score 
-                                    WHEN sched_call_score != 0 THEN sched_call_score 
-                                    WHEN complaint_call_score != 0 THEN complaint_call_score 
-                                    WHEN procedure_call_score != 0 THEN procedure_call_score
-                                    WHEN sched_proc_veri_score != 0 THEN sched_proc_veri_score
-                                END) AS overall_avg_non_zero
-                                FROM qa 
-                                WHERE (trainer = %s AND agent = %s AND (upload_date >= %s AND upload_date <= %s));"""
+                            AVG(intro + sched_call_score + complaint_call_score + confirm + clinical + resched) AS overall_avg
+                        FROM qa 
+                        WHERE (trainer = %s AND agent = %s
+                        AND upload_date BETWEEN %s AND %s);"""
                     DATA = (name, agent, new_from, from_date) # the from_date becomes the new "to" date
                     cur.execute(SQL, DATA)
                     agent_past_average = cur.fetchone()[0] # type: ignore
@@ -510,12 +656,11 @@ async def run_report(month_from: int = Form(...), day_from: int = Form(...), yea
                 writer.writerow([name, CLINICS[name], ', '.join(agents_scored), avg, calls, date_range, ', '.join(trending_down), ', '.join(trending_up), total_scoring_time]) # type: ignore
                
             except Exception as e:
-                ic(e)
+                ic("Error is here!", e)
                 continue        
         hours = str(math.floor(team_scoring_time / 3600))
         minutes = str(math.floor((team_scoring_time % 3600) / 60)) # type: ignore
-        seconds = str(int(team_scoring_time % 60)) # type: ignore
-        
+        seconds = str(int(team_scoring_time % 60)) # type: ignore        
         
         if len(minutes) == 1:
             minutes = '0' + minutes
@@ -560,27 +705,7 @@ I have separated them from the FastAPI endpoints for ease of working and maintai
 
 # Set up postgresql table
 def init_db():
-    con = psycopg2.connect(CONNECT_STR)
-    cur = con.cursor()
-    cur.execute('''CREATE TABLE IF NOT EXISTS qa 
-                (id SERIAL PRIMARY KEY, 
-                agent TEXT,
-                extension TEXT,
-                clinic TEXT,
-                date_time TEXT,
-                phone TEXT,
-                handle_time TEXT,
-                upload_date DATE DEFAULT CURRENT_DATE,
-                gen_call_score INT,
-                trainer TEXT,
-                qa_date DATE,
-                overall_result TEXT,
-                filename TEXT,
-                scoring_time TEXT)
-                ;'''
-            )
-    cur.close()
-    con.commit()
+    pass
 
 def get_trainer_files(trainer) -> list[tuple]:
     con = psycopg2.connect(CONNECT_STR)
@@ -608,14 +733,8 @@ def get_average_score(name) -> float:
     con = psycopg2.connect(CONNECT_STR)
     cur = con.cursor()
     SQL ="""
-    SELECT  
-       AVG(CASE 
-           WHEN gen_call_score != 0 THEN gen_call_score 
-           WHEN sched_call_score != 0 THEN sched_call_score 
-           WHEN complaint_call_score != 0 THEN complaint_call_score 
-           WHEN procedure_call_score != 0 THEN procedure_call_score
-           WHEN sched_proc_veri_score != 0 THEN sched_proc_veri_score
-       END) AS overall_avg_non_zero       
+    SELECT 
+        AVG(intro + sched_call_score + complaint_call_score + confirm + clinical + resched) AS overall_avg      
     FROM qa
     WHERE (trainer = %s AND upload_date = CURRENT_DATE);"""
     cur.execute(SQL, (name,))
@@ -702,7 +821,6 @@ def file_check(request: Request) -> HTMLResponse:
                 checkbox.dataset.name
             ]);            
 
-            // Get the form's action URL
             const form = document.getElementById("dynamicForm");
             const endpoint = form.action;
 
